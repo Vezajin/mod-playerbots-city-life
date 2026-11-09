@@ -1,4 +1,4 @@
--- Apply to the CHARACTERS database, never WORLD.
+-- Applied by the AzerothCore DB updater (data/sql/db-characters/); CHARACTERS database only, never WORLD.
 -- Keep this table until every borrowed outfit has been recovered. Rows are transient recovery data.
 -- Re-running this file preserves in-progress equipment journals.
 CREATE TABLE IF NOT EXISTS `city_life_custom_equipment` (

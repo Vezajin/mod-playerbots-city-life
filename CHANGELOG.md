@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-09 - Safe to run beside real players
+
+- Apply `world_city_life.sql` and `characters_city_life_custom.sql` automatically through the DB
+  updater (moved to `data/sql/db-world/` and `data/sql/db-characters/`); both are safe to rerun.
+- Add `CityLife.Bots.ExcludeAccountPrefix` (empty by default). Bots on such accounts, bots in a guild
+  with a real member, and bots on a real player's friend list are never borrowed by City Life hubs.
+- Never teleport a bot, to a hub or back on release, while a real player is within 150 yards of its
+  current position or destination; fetches pick another bot, releases retry on a later pass.
+
 ## 2026-10-25 - Human behavior update
 
 - Add independently configurable, infrequent inspect, weapon sheath and owned cosmetic-companion

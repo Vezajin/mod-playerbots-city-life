@@ -41,6 +41,12 @@ namespace CityLife
         TeamSide TeamForRace(uint8 race) const;
         Player* FindPlayer(uint32 guidLow) const;
         bool IsConfiguredBotAccount(uint32 accountId);
+        bool HasExcludedAccountPrefix(uint32 accountId);
+        bool IsBotCharacter(uint32 guidLow, uint32 accountId);
+        bool HasRealGuildMember(Player* player);
+        bool IsFriendOfRealPlayer(uint32 guidLow);
+        bool TeleportBlocked(Player* player, uint32 mapId, float x, float y, float z) const;
+        bool ReturnBlocked(Resident const& resident, Player* player) const;
         bool IsCandidate(Player* player);
         bool IsResident(uint32 guidLow) const;
         bool IsResidentUsable(Player* player) const;
@@ -106,6 +112,7 @@ namespace CityLife
         std::string _botAccountPrefix = "auto";
         uint32 _botAccountMin = 0;
         uint32 _botAccountMax = 0;
+        std::string _excludeAccountPrefix;
         uint32 _botQueryLimit = 500;
         bool _skipGroupedBots = true;
         bool _respectPlayerbotActivity = false;
@@ -137,6 +144,15 @@ namespace CityLife
         std::vector<Hub> _hubs;
         std::vector<Resident> _residents;
         std::unordered_map<uint32, bool> _botAccountCache;
+        std::unordered_map<uint32, bool> _excludedAccountCache;
+        struct GuildRealMemberEntry
+        {
+            bool HasRealMember = false;
+            uint32 ExpiresAt = 0;
+        };
+        std::unordered_map<uint32, GuildRealMemberEntry> _guildRealMemberCache;
+        std::unordered_set<uint32> _realFriendGuids;
+        uint32 _realFriendsExpireAt = 0;
         std::unordered_map<uint32, std::weak_ptr<QuestingControl>> _questingControls;
         std::unordered_map<uint64, uint32> _questerCooldownUntil;
     };

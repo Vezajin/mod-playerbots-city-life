@@ -221,7 +221,7 @@ namespace CityLife
             CharacterDatabase.Query("SHOW TABLES LIKE 'city_life_custom_equipment'"));
         if (!_databaseReady)
         {
-            LOG_ERROR("module", "[CityLife.Custom] Apply data/sql/manual/characters_city_life_custom.sql "
+            LOG_ERROR("module", "[CityLife.Custom] Apply data/sql/db-characters/characters_city_life_custom.sql "
                 "to CHARACTERS before enabling legendary, beggar or fishing equipment.");
             return;
         }

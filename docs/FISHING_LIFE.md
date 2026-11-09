@@ -118,9 +118,9 @@ bots. These examples describe population budgets, not measured hardware requirem
 ## Installation and migration
 
 1. Keep the existing City Life base WORLD tables.
-2. Apply `world_city_life_custom.sql` to WORLD for the historical fishing hubs/chat, and both
-   `characters_city_life_custom.sql` and `characters_city_life_custom_bots.sql` to CHARACTERS
-   if these were not installed previously.
+2. Apply `world_city_life_custom.sql` to WORLD for the historical fishing hubs/chat, and
+   `characters_city_life_custom_bots.sql` to CHARACTERS if these were not installed previously
+   (`characters_city_life_custom.sql` is applied automatically by the DB updater).
 3. Apply `data/sql/manual/world_city_life_fishing.sql` to WORLD. It adds the expanded locations
    and named anchors without replacing existing named settings or character records.
 4. Apply `world_city_life_fishing_spacing.sql` to WORLD to move an older default Stormwind

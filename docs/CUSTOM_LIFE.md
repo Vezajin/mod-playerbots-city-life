@@ -8,8 +8,9 @@ section and switch, independent of `CityLife.Custom.Enable`.
 ## Installation and updates
 
 Apply `data/sql/manual/world_city_life_custom.sql` to WORLD after `world_city_life.sql`, and apply
-both `data/sql/manual/characters_city_life_custom.sql` and
-`data/sql/manual/characters_city_life_custom_bots.sql` to CHARACTERS. Use the matching updated binary
+`data/sql/manual/characters_city_life_custom_bots.sql` to CHARACTERS
+(`world_city_life.sql` and `characters_city_life_custom.sql` are applied automatically by the DB
+updater from `data/sql/db-world/` and `data/sql/db-characters/`). Use the matching updated binary
 and the sole `mod_playerbots_city_life.conf` file. The additive seeds preserve existing named
 records and Custom chat IDs when rerun. Back up your configuration and databases before updating.
 

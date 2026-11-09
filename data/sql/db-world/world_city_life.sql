@@ -1,5 +1,7 @@
 -- City Life
--- Apply to the AzerothCore WORLD database.
+-- Applied by the AzerothCore DB updater (data/sql/db-world/); also safe to apply by hand.
+-- Re-running is idempotent: tables are created only if missing, hubs are upserted by name, and only the
+-- bundled spots are replaced.
 
 CREATE TABLE IF NOT EXISTS `city_life_hub` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,

@@ -15,12 +15,15 @@
 
 #include "AreaDefines.h"
 #include "BattlefieldMgr.h"
+#include "CharacterCache.h"
 #include "Chat.h"
 #include "Config.h"
 #include "DatabaseEnv.h"
 #include "DBCStores.h"
 #include "GameTime.h"
 #include "Group.h"
+#include "Guild.h"
+#include "GuildMgr.h"
 #include "Log.h"
 #include "Map.h"
 #include "MapMgr.h"
@@ -60,6 +63,23 @@ namespace
     constexpr float GroundLayerTolerance = 3.0f;
     constexpr float DestinationTolerance = 1.0f;
     constexpr float ArrivalTolerance = 1.5f;
+    // No bot is teleported while a real player stands this close to where it is or where it would arrive.
+    constexpr float RealPlayerGuardRadius = 150.0f;
+    // Guild and friend-list answers are reused this long; a real player's new guild or friend is seen within it.
+    constexpr uint32 SocialCacheSeconds = 60;
+
+    bool RealPlayerNear(uint32 mapId, float x, float y, float z, float radius)
+    {
+        std::shared_lock<std::shared_mutex> playerLock(*HashMapHolder<Player>::GetLock());
+        for (auto const& pair : ObjectAccessor::GetPlayers())
+        {
+            Player* other = pair.second;
+            if (other && other->IsInWorld() && other->GetSession() && other->GetMapId() == mapId &&
+                ::IsRealPlayer(other) && other->GetExactDist(x, y, z) <= radius)
+                return true;
+        }
+        return false;
+    }
 
     std::vector<std::pair<float, float>> FishingOffsets(CityLife::Spot const& spot, float spacing)
     {
@@ -277,6 +297,7 @@ namespace CityLife
         _botAccountPrefix = sConfigMgr->GetOption<std::string>("CityLife.Bots.AccountPrefix", "auto");
         _botAccountMin = sConfigMgr->GetOption<uint32>("CityLife.Bots.AccountMin", 0);
         _botAccountMax = sConfigMgr->GetOption<uint32>("CityLife.Bots.AccountMax", 0);
+        _excludeAccountPrefix = Lower(sConfigMgr->GetOption<std::string>("CityLife.Bots.ExcludeAccountPrefix", ""));
         _botQueryLimit = std::max<uint32>(50, sConfigMgr->GetOption<uint32>("CityLife.Bots.QueryLimit", 500));
         _skipGroupedBots = sConfigMgr->GetOption<bool>("CityLife.Bots.SkipGrouped", true);
         _respectPlayerbotActivity = sConfigMgr->GetOption<bool>("CityLife.Bots.RespectPlayerbotActivity", false);
@@ -352,6 +373,10 @@ namespace CityLife
 
         ImportPlayerbotDefaults();
         _botAccountCache.clear();
+        _excludedAccountCache.clear();
+        _guildRealMemberCache.clear();
+        _realFriendGuids.clear();
+        _realFriendsExpireAt = 0;
         _startupElapsedMs = 0;
         _timerMs = 0;
         _customTimerMs = 0;
@@ -366,9 +391,9 @@ namespace CityLife
         sCityLifeCustomSocial.LoadData();
         sCityLifeHumanBehavior.LoadConfig();
 
-        LOG_INFO("module", "[CityLife] enable={} database={} hubs={} maxTotal={} timeScale={} prefix='{}'",
-            _enable ? 1 : 0, _databaseReady ? 1 : 0, _hubs.size(), _maxTotalPopulation,
-            _timeScaling ? 1 : 0, _botAccountPrefix);
+        LOG_INFO("module", "[CityLife] enable={} database={} hubs={} maxTotal={} timeScale={} prefix='{}' "
+            "excludePrefix='{}'", _enable ? 1 : 0, _databaseReady ? 1 : 0, _hubs.size(), _maxTotalPopulation,
+            _timeScaling ? 1 : 0, _botAccountPrefix, _excludeAccountPrefix);
     }
 
     void Manager::ImportPlayerbotDefaults()
@@ -390,13 +415,13 @@ namespace CityLife
         if (!WorldDatabase.Query("SHOW TABLES LIKE 'city_life_hub'"))
         {
             LOG_ERROR("module", "[CityLife] Missing WORLD table city_life_hub. "
-                "Apply data/sql/manual/world_city_life.sql");
+                "Apply data/sql/db-world/world_city_life.sql");
             return false;
         }
         if (!WorldDatabase.Query("SHOW TABLES LIKE 'city_life_spot'"))
         {
             LOG_ERROR("module", "[CityLife] Missing WORLD table city_life_spot. "
-                "Apply data/sql/manual/world_city_life.sql");
+                "Apply data/sql/db-world/world_city_life.sql");
             return false;
         }
         return true;
@@ -544,6 +569,103 @@ namespace CityLife
         return accepted;
     }
 
+    bool Manager::HasExcludedAccountPrefix(uint32 accountId)
+    {
+        if (!accountId || _excludeAccountPrefix.empty())
+            return false;
+        auto cached = _excludedAccountCache.find(accountId);
+        if (cached != _excludedAccountCache.end())
+            return cached->second;
+
+        bool excluded = false;
+        QueryResult result = LoginDatabase.Query("SELECT username FROM account WHERE id={} LIMIT 1", accountId);
+        if (result)
+            excluded = Lower(result->Fetch()[0].Get<std::string>()).rfind(_excludeAccountPrefix, 0) == 0;
+        _excludedAccountCache[accountId] = excluded;
+        return excluded;
+    }
+
+    bool Manager::IsBotCharacter(uint32 guidLow, uint32 accountId)
+    {
+        return sPlayerbotAIConfig.IsInRandomAccountList(accountId) || sCityLifeCustomBotPool.IsManagedBot(guidLow) ||
+            IsConfiguredBotAccount(accountId) || HasExcludedAccountPrefix(accountId);
+    }
+
+    bool Manager::HasRealGuildMember(Player* player)
+    {
+        uint32 const guildId = player->GetGuildId();
+        if (!guildId)
+            return false;
+        uint32 const now = GameTimeSeconds();
+        auto cached = _guildRealMemberCache.find(guildId);
+        if (cached != _guildRealMemberCache.end() && cached->second.ExpiresAt > now)
+            return cached->second.HasRealMember;
+
+        // Guild rosters are in memory and include offline members, so an offline real player still counts.
+        bool hasRealMember = false;
+        if (Guild const* guild = sGuildMgr->GetGuildById(guildId))
+            for (auto const& entry : guild->GetUnorderedMembers())
+                if (!IsBotCharacter(entry.first, entry.second.GetAccountId()))
+                {
+                    hasRealMember = true;
+                    break;
+                }
+        _guildRealMemberCache[guildId] = {hasRealMember, now + SocialCacheSeconds};
+        return hasRealMember;
+    }
+
+    bool Manager::IsFriendOfRealPlayer(uint32 guidLow)
+    {
+        uint32 const now = GameTimeSeconds();
+        if (now >= _realFriendsExpireAt)
+        {
+            // character_social also covers offline real players; the owner's account decides who is real.
+            _realFriendGuids.clear();
+            std::unordered_map<uint32, bool> ownerIsReal;
+            QueryResult result = CharacterDatabase.Query(
+                "SELECT guid,friend FROM character_social WHERE (flags & 1) = 1");
+            if (result)
+            {
+                do
+                {
+                    Field* fields = result->Fetch();
+                    uint32 const owner = fields[0].Get<uint32>();
+                    auto known = ownerIsReal.find(owner);
+                    if (known == ownerIsReal.end())
+                    {
+                        uint32 const account = sCharacterCache->GetCharacterAccountIdByGuid(
+                            ObjectGuid::Create<HighGuid::Player>(owner));
+                        known = ownerIsReal.emplace(owner, account && !IsBotCharacter(owner, account)).first;
+                    }
+                    if (known->second)
+                        _realFriendGuids.insert(fields[1].Get<uint32>());
+                } while (result->NextRow());
+            }
+            _realFriendsExpireAt = now + SocialCacheSeconds;
+        }
+        return _realFriendGuids.find(guidLow) != _realFriendGuids.end();
+    }
+
+    bool Manager::TeleportBlocked(Player* player, uint32 mapId, float x, float y, float z) const
+    {
+        bool const blocked =
+            RealPlayerNear(player->GetMapId(), player->GetPositionX(), player->GetPositionY(),
+                player->GetPositionZ(), RealPlayerGuardRadius) ||
+            RealPlayerNear(mapId, x, y, z, RealPlayerGuardRadius);
+        if (blocked && _debug)
+            LOG_INFO("module", "[CityLife] Teleport of {} deferred: a real player is within {} yards.",
+                player->GetName(), RealPlayerGuardRadius);
+        return blocked;
+    }
+
+    bool Manager::ReturnBlocked(Resident const& resident, Player* player) const
+    {
+        // Mirrors the conditions under which ReleaseResident sends a bot home at all.
+        return player && player->GetSession() && !player->IsBeingTeleported() && !player->IsInCombat() &&
+            TeleportBlocked(player, resident.OriginalMap, resident.OriginalX, resident.OriginalY,
+                resident.OriginalZ);
+    }
+
     bool Manager::IsCandidate(Player* player)
     {
         if (!player || !player->GetSession() || !player->IsInWorld() || player->IsBeingTeleported())
@@ -551,6 +673,9 @@ namespace CityLife
         if (!sRandomPlayerbotMgr.IsRandomBot(player) &&
             !sCityLifeCustomBotPool.IsManagedBot(player->GetGUID().GetCounter()) &&
             !IsConfiguredBotAccount(player->GetSession()->GetAccountId()))
+            return false;
+        // Roster bots belong to the roster module, never to a hub.
+        if (HasExcludedAccountPrefix(player->GetSession()->GetAccountId()))
             return false;
         if (PlayerbotsLife::IsReserved(player->GetGUID().GetCounter()))
             return false;
@@ -573,7 +698,11 @@ namespace CityLife
             return false;
         if (_skipGroupedBots && player->GetGroup())
             return false;
-        return !IsResident(player->GetGUID().GetCounter());
+        uint32 const guidLow = player->GetGUID().GetCounter();
+        if (IsResident(guidLow))
+            return false;
+        // A bot a real player knows (same guild, or on their friend list) is never borrowed.
+        return !HasRealGuildMember(player) && !IsFriendOfRealPlayer(guidLow);
     }
 
     bool Manager::IsResidentUsable(Player* player) const
@@ -842,6 +971,10 @@ namespace CityLife
         Spot const* spot = ChooseSpot(hub);
         if (!spot)
             return false;
+        // Every destination in this spot lies within its radius of the centre, so this never misses a real
+        // player who is within the guard radius of the actual arrival point. The hub is retried next tick.
+        if (RealPlayerNear(hub.MapId, spot->X, spot->Y, spot->Z, RealPlayerGuardRadius + spot->Radius))
+            return false;
         std::vector<BotCandidate> candidates = LoadCandidates(hub);
         if (candidates.empty())
         {
@@ -854,10 +987,23 @@ namespace CityLife
             return false;
         }
 
-        BotCandidate const& bot = candidates.front();
-        Player* player = FindPlayer(bot.GuidLow);
-        if (!IsCandidate(player))
+        // A bot a real player can see leave is skipped in favour of the next candidate.
+        BotCandidate const* chosen = nullptr;
+        Player* player = nullptr;
+        for (BotCandidate const& candidate : candidates)
+        {
+            Player* found = FindPlayer(candidate.GuidLow);
+            if (!IsCandidate(found) ||
+                RealPlayerNear(found->GetMapId(), found->GetPositionX(), found->GetPositionY(),
+                    found->GetPositionZ(), RealPlayerGuardRadius))
+                continue;
+            chosen = &candidate;
+            player = found;
+            break;
+        }
+        if (!chosen)
             return false;
+        BotCandidate const& bot = *chosen;
         PlayerbotsLife::ReservationOwner owner = hub.Custom == CustomRole::None ?
             PlayerbotsLife::ReservationOwner::CityLife : PlayerbotsLife::ReservationOwner::CustomLife;
         if (!PlayerbotsLife::TryReserve(bot.GuidLow, owner))
@@ -966,8 +1112,11 @@ namespace CityLife
 
     bool Manager::ReleaseResident(Resident const& resident, bool returnHome)
     {
-        sCityLifeHumanBehavior.Remove(resident.Bot.GuidLow);
         Player* player = FindPlayer(resident.Bot.GuidLow);
+        // Nothing has been undone yet, so the resident simply stays and every caller retries on a later pass.
+        if (returnHome && ReturnBlocked(resident, player))
+            return false;
+        sCityLifeHumanBehavior.Remove(resident.Bot.GuidLow);
         if (resident.Custom == CustomRole::Beggar && player && !player->IsInCombat() &&
             resident.MovementSplineId && player->movespline->GetId() == resident.MovementSplineId)
             player->StopMoving();
@@ -1112,7 +1261,8 @@ namespace CityLife
                         Player* player = FindPlayer(resident.Bot.GuidLow);
                         return resident.HubId == hub.Id && player && !player->IsInCombat() &&
                             !player->IsBeingTeleported() &&
-                            (!resident.Questing || !player->IsNonMeleeSpellCast(false));
+                            (!resident.Questing || !player->IsNonMeleeSpellCast(false)) &&
+                            !(_returnBots && ReturnBlocked(resident, player));
                     });
                 if (found == _residents.rend())
                     break;
@@ -1430,8 +1580,10 @@ namespace CityLife
 
     bool Manager::TeleportBot(Player* player, uint32 mapId, float x, float y, float z, float o) const
     {
-        if (!std::isfinite(o) || !ResolveGround(player, mapId, x, y, z) ||
-            !player->TeleportTo(mapId, x, y, z, o))
+        // The single choke point: every City Life teleport, whatever the caller checked, is refused here
+        // while a real player could watch the bot leave or arrive.
+        if (!std::isfinite(o) || TeleportBlocked(player, mapId, x, y, z) ||
+            !ResolveGround(player, mapId, x, y, z) || !player->TeleportTo(mapId, x, y, z, o))
             return false;
         player->GetMotionMaster()->Clear(false);
         player->GetMotionMaster()->MoveIdle();
@@ -1665,6 +1817,9 @@ namespace CityLife
             _customTimerMs = IN_MILLISECONDS;
             sCityLifeCustomActivities.RecoverPending();
             MaintainCustomResidents();
+            // While disabled nothing else maintains residents; retry returns the real-player guard deferred.
+            if (!_enable && !_residents.empty())
+                ReleaseAll(true);
             if (_enable && _startupElapsedMs >= _startupDelaySeconds * IN_MILLISECONDS)
             {
                 UpdateSocialResidents();
