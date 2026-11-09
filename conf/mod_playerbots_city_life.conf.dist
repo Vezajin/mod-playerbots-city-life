@@ -68,6 +68,8 @@ CityLife.Bots.AccountMax = 0
 
 # Bots whose account username starts with this prefix (case-insensitive) are never borrowed by City
 # Life, for example the accounts a bot-roster module owns. Empty (default) disables the rule.
+# The matching accounts are read once when the configuration loads; an account created later is
+# picked up at the next config reload.
 CityLife.Bots.ExcludeAccountPrefix = ""
 
 CityLife.Bots.QueryLimit = 500

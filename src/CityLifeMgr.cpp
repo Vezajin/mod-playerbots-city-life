@@ -373,7 +373,7 @@ namespace CityLife
 
         ImportPlayerbotDefaults();
         _botAccountCache.clear();
-        _excludedAccountCache.clear();
+        LoadExcludedAccounts();
         _guildRealMemberCache.clear();
         _realFriendGuids.clear();
         _realFriendsExpireAt = 0;
@@ -569,20 +569,38 @@ namespace CityLife
         return accepted;
     }
 
-    bool Manager::HasExcludedAccountPrefix(uint32 accountId)
+    void Manager::LoadExcludedAccounts()
     {
-        if (!accountId || _excludeAccountPrefix.empty())
-            return false;
-        auto cached = _excludedAccountCache.find(accountId);
-        if (cached != _excludedAccountCache.end())
-            return cached->second;
+        _excludedAccountIds.clear();
+        if (_excludeAccountPrefix.empty())
+            return;
 
-        bool excluded = false;
-        QueryResult result = LoginDatabase.Query("SELECT username FROM account WHERE id={} LIMIT 1", accountId);
+        // Account usernames are stored uppercase. Escape the LIKE wildcards first, then the SQL string.
+        std::string pattern;
+        for (unsigned char c : _excludeAccountPrefix)
+        {
+            char const upper = static_cast<char>(std::toupper(c));
+            if (upper == '\\' || upper == '%' || upper == '_')
+                pattern += '\\';
+            pattern += upper;
+        }
+        LoginDatabase.EscapeString(pattern);
+
+        QueryResult result = LoginDatabase.Query("SELECT id FROM account WHERE username LIKE '{}%'", pattern);
         if (result)
-            excluded = Lower(result->Fetch()[0].Get<std::string>()).rfind(_excludeAccountPrefix, 0) == 0;
-        _excludedAccountCache[accountId] = excluded;
-        return excluded;
+        {
+            do
+            {
+                _excludedAccountIds.insert(result->Fetch()[0].Get<uint32>());
+            } while (result->NextRow());
+        }
+        LOG_INFO("module", "[CityLife] {} accounts match excludePrefix '{}'.", _excludedAccountIds.size(),
+            _excludeAccountPrefix);
+    }
+
+    bool Manager::HasExcludedAccountPrefix(uint32 accountId) const
+    {
+        return accountId && _excludedAccountIds.find(accountId) != _excludedAccountIds.end();
     }
 
     bool Manager::IsBotCharacter(uint32 guidLow, uint32 accountId)
@@ -1110,10 +1128,24 @@ namespace CityLife
         return true;
     }
 
+    bool Manager::CanReturnHome(Resident const& resident, Player* player)
+    {
+        // Only a bot City Life is still driving is sent home, and only when the release is discretionary.
+        // A bot that is grouped, controlled by a player, on another map, flying or riding a transport, or whose
+        // hub is gone must leave the resident list now and is released in place, with no teleport.
+        Hub const* hub = FindHub(resident.HubId);
+        return _returnBots && hub && IsResidentUsable(player) && !player->GetGroup() &&
+            player->GetMapId() == hub->MapId && !player->IsFlying() && !player->GetTransport() &&
+            !player->GetVehicle() && !player->GetTransGUID() &&
+            !player->HasUnitMovementFlag(MOVEMENTFLAG_CAN_FLY | MOVEMENTFLAG_DISABLE_GRAVITY |
+                MOVEMENTFLAG_ONTRANSPORT);
+    }
+
     bool Manager::ReleaseResident(Resident const& resident, bool returnHome)
     {
         Player* player = FindPlayer(resident.Bot.GuidLow);
-        // Nothing has been undone yet, so the resident simply stays and every caller retries on a later pass.
+        // A return home that the real-player guard defers leaves the resident untouched and every caller
+        // retries on a later pass. Callers pass returnHome=false for a bot that must leave now (see CanReturnHome).
         if (returnHome && ReturnBlocked(resident, player))
             return false;
         sCityLifeHumanBehavior.Remove(resident.Bot.GuidLow);
@@ -1155,7 +1187,9 @@ namespace CityLife
     {
         std::erase_if(_residents, [&](Resident const& resident)
         {
-            return ReleaseResident(resident, returnHome && _returnBots);
+            // A bot that is no longer usable is released in place at once; only a usable one waits for the guard.
+            return ReleaseResident(resident,
+                returnHome && CanReturnHome(resident, FindPlayer(resident.Bot.GuidLow)));
         });
     }
 
@@ -1223,7 +1257,10 @@ namespace CityLife
                             "inactive, idle or outside level bracket.",
                             resident->Bot.Name, hub->Name);
                 }
-                if (ReleaseResident(*resident, (residenceExpired || questingExpired) && _returnBots))
+                // Only an expiry sends the bot home, and only while it is still usable and in place.
+                bool const returnHome = (residenceExpired || questingExpired) &&
+                    CanReturnHome(*resident, player);
+                if (ReleaseResident(*resident, returnHome))
                     resident = _residents.erase(resident);
                 else
                     ++resident;
@@ -1737,7 +1774,9 @@ namespace CityLife
                 sCityLifeCustomActivities.IsSafeCombat(player);
             if (!usable)
             {
-                if (ReleaseResident(*resident, _returnBots))
+                // Disabled, paused or out-of-bracket residents that are still usable wait for the guard;
+                // an unusable one is released in place at once.
+                if (ReleaseResident(*resident, CanReturnHome(*resident, player)))
                     resident = _residents.erase(resident);
                 else
                     ++resident;

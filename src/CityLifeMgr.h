@@ -41,7 +41,8 @@ namespace CityLife
         TeamSide TeamForRace(uint8 race) const;
         Player* FindPlayer(uint32 guidLow) const;
         bool IsConfiguredBotAccount(uint32 accountId);
-        bool HasExcludedAccountPrefix(uint32 accountId);
+        void LoadExcludedAccounts();
+        bool HasExcludedAccountPrefix(uint32 accountId) const;
         bool IsBotCharacter(uint32 guidLow, uint32 accountId);
         bool HasRealGuildMember(Player* player);
         bool IsFriendOfRealPlayer(uint32 guidLow);
@@ -63,6 +64,7 @@ namespace CityLife
         std::vector<Hub> EffectiveHubs() const;
 
         bool AddResident(Hub const& hub, uint32 targetPopulation);
+        bool CanReturnHome(Resident const& resident, Player* player);
         bool ReleaseResident(Resident const& resident, bool returnHome);
         void ReleaseAll(bool returnHome);
         void RemoveUnavailableResidents();
@@ -144,7 +146,8 @@ namespace CityLife
         std::vector<Hub> _hubs;
         std::vector<Resident> _residents;
         std::unordered_map<uint32, bool> _botAccountCache;
-        std::unordered_map<uint32, bool> _excludedAccountCache;
+        // Account ids whose username starts with _excludeAccountPrefix, read once per config load.
+        std::unordered_set<uint32> _excludedAccountIds;
         struct GuildRealMemberEntry
         {
             bool HasRealMember = false;

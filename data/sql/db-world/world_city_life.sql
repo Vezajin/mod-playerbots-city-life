@@ -1,7 +1,10 @@
 -- City Life
--- Applied by the AzerothCore DB updater (data/sql/db-world/); also safe to apply by hand.
--- Re-running is idempotent: tables are created only if missing, hubs are upserted by name, and only the
--- bundled spots are replaced.
+-- Applied by the AzerothCore DB updater (data/sql/db-world/), which runs the whole file again whenever its
+-- content changes; also safe to apply by hand.
+-- Re-running only adds: tables are created if missing, a bundled hub is inserted if no hub has that name
+-- and a bundled spot is inserted if that hub has no spot with that name. Existing hub and spot rows are
+-- never changed or deleted, so in-game edits (.citylife hub/spot) survive. To reset the bundled hubs and
+-- spots to the values below, run data/sql/manual/world_city_life_refresh_bundled.sql and then this file.
 
 CREATE TABLE IF NOT EXISTS `city_life_hub` (
   `id` INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -37,7 +40,7 @@ CREATE TABLE IF NOT EXISTS `city_life_spot` (
     ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Re-applicable seed hubs. Config values override default_population at runtime.
+-- Seed hubs. Config values override default_population at runtime. A hub that already exists is left as is.
 INSERT INTO `city_life_hub`
 (`name`,`enabled`,`team`,`min_level`,`max_level`,`map_id`,`default_population`,`priority`)
 VALUES
@@ -65,23 +68,12 @@ VALUES
 ('RebelCampQuesting',1,0,30,40,0,8,180),
 ('FarshireQuesting',1,0,68,72,571,8,180),
 ('WarsongHoldQuesting',1,1,68,72,571,8,180)
-ON DUPLICATE KEY UPDATE
-`enabled`=VALUES(`enabled`),`team`=VALUES(`team`),`min_level`=VALUES(`min_level`),
-`max_level`=VALUES(`max_level`),`map_id`=VALUES(`map_id`),
-`default_population`=VALUES(`default_population`),`priority`=VALUES(`priority`);
-
--- Replace only the bundled spots. Custom hubs remain untouched.
-DELETE `spot` FROM `city_life_spot` AS `spot`
-INNER JOIN `city_life_hub` AS `hub` ON `hub`.`id`=`spot`.`hub_id`
-WHERE `hub`.`name` IN
-('Stormwind','Orgrimmar','Ironforge','Undercity','Darnassus','ThunderBluff','Exodar','Silvermoon',
- 'Shattrath','Dalaran','WintergraspAlliance','WintergraspHorde','Gadgetzan','Goldshire','HonorHold',
- 'Thrallmar','BootyBay','Darkshire','RebelCamp','ValianceKeep','WarsongHold','RebelCampQuesting',
- 'FarshireQuesting','WarsongHoldQuesting');
+ON DUPLICATE KEY UPDATE `id`=`id`;
 
 -- Coordinates are based on AzerothCore 3.3.5 game_tele and service NPC/gameobject positions.
 -- Use .citylife spot add in game to tune a point for a different navmesh or custom world database.
-INSERT INTO `city_life_spot`
+-- INSERT IGNORE skips a spot whose (hub_id, name) already exists (uq_city_life_spot_name).
+INSERT IGNORE INTO `city_life_spot`
 (`hub_id`,`name`,`category`,`enabled`,`x`,`y`,`z`,`o`,`radius`,`weight`)
 SELECT `hub`.`id`,`seed`.`spot_name`,`seed`.`category`,1,`seed`.`x`,`seed`.`y`,`seed`.`z`,`seed`.`o`,
        `seed`.`radius`,`seed`.`weight`

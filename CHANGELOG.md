@@ -4,10 +4,15 @@
 
 - Apply `world_city_life.sql` and `characters_city_life_custom.sql` automatically through the DB
   updater (moved to `data/sql/db-world/` and `data/sql/db-characters/`); both are safe to rerun.
+  `world_city_life.sql` now only adds missing hubs and spots and never overwrites edits; the old
+  reset of the bundled hubs and spots is `data/sql/manual/world_city_life_refresh_bundled.sql`.
 - Add `CityLife.Bots.ExcludeAccountPrefix` (empty by default). Bots on such accounts, bots in a guild
   with a real member, and bots on a real player's friend list are never borrowed by City Life hubs.
+  The matching accounts are read when the configuration loads.
 - Never teleport a bot, to a hub or back on release, while a real player is within 150 yards of its
-  current position or destination; fetches pick another bot, releases retry on a later pass.
+  current position or destination; fetches pick another bot, optional releases retry on a later pass.
+  A bot that must leave at once (grouped, player-controlled, on another map, flying, on a transport,
+  hub gone) is released in place without a teleport.
 
 ## 2026-10-25 - Human behavior update
 
