@@ -178,11 +178,62 @@ residents or questers. Existing City Life and PvP population settings remain sep
 Bots already present in Wintergrasp are protected and never borrowed for other City Life hubs.
 The bundled faction-specific Wintergrasp hubs maintain their own reserved populations.
 
+### Bots City Life never borrows, and teleports it holds back
+
+These rules apply to every City Life hub (residents, questers, Custom and Fishing roles). PvP Life
+keeps its own selection.
+
+- A bot whose account username starts with `CityLife.Bots.ExcludeAccountPrefix` (case-insensitive;
+  empty by default, which turns the rule off) is never a candidate. The matching account ids are
+  read from the login database when the configuration loads (server start and `.reload config`), so
+  an account created afterwards is picked up at the next reload.
+- A bot in a guild that has at least one real (non-bot) member is never a candidate, whether that
+  member is online or not.
+- A bot on the friend list of any real player's character, online or offline, is never a candidate.
+  Guild and friend-list answers are cached for 60 seconds.
+- City Life does not teleport a bot while a real player is within 150 yards of its current position
+  or of its destination, either when it is fetched to a hub or when it is sent back to where it came
+  from on release (`CityLife.Bots.ReturnWhenReleased`). A fetch then tries another bot, or the hub
+  retries on a later tick. A release that is optional (expired residence, population shrink, City
+  Life disabled) leaves a usable bot in place and retries on a later pass. A bot that has to leave
+  at once (grouped, controlled by a real player, on another map, flying, on a transport, or its hub
+  gone) is released where it stands with no teleport. A self-bot (a player's own character running
+  playerbot AI, so it is its own master) counts as a real player for the 150-yard check. The radius
+  is a constant in `CityLifeMgr.cpp`, not a setting.
+- The guard covers City Life's own teleports only. A random bot sent home is scheduled for
+  mod-playerbots' default teleport delay (60 seconds plus one to three times
+  `Playerbots.RandomBotUpdateInterval`). A random bot that is not sent home (released in place, or in
+  combat, mid-teleport or without a safe return spot) is scheduled for a normal
+  random-teleport interval instead (between `Playerbots.MinRandomBotTeleportInterval` and
+  `Playerbots.MaxRandomBotTeleportInterval`). Either way mod-playerbots' random teleport
+  (`RandomTeleportForLevel`) later moves the bot and does not check for nearby real players.
+
+#### A member is a bot when...
+
+A guild member or friend-list owner counts as a bot, not a real player, when any of these is true;
+every other account is a real player's:
+
+1. its account is in mod-playerbots' random-bot account list;
+2. its character is one of City Life's managed bot characters (the Custom bot pool);
+3. its account matches `CityLife.Bots.AccountPrefix` (by default the playerbots random-bot prefix)
+   or lies within `CityLife.Bots.AccountMin` to `CityLife.Bots.AccountMax`;
+4. its account username starts with `CityLife.Bots.ExcludeAccountPrefix`.
+
 ## Installation
 
 1. Install `mod-playerbots-city-life` in the core's `modules` directory. Move the former standalone
    `mod-playerbots-pvp-life` folder outside `modules`, so it is not compiled a second time.
-2. For a fresh installation, apply `data/sql/manual/world_city_life.sql` to the WORLD database.
+2. `data/sql/db-world/world_city_life.sql` (City Life base tables and seed hubs) and
+   `data/sql/db-characters/characters_city_life_custom.sql` (Custom equipment recovery) are applied
+   automatically by the AzerothCore DB updater and are safe to rerun; do not apply them by hand.
+   The updater reruns a changed file whole, so `world_city_life.sql` only adds: a bundled hub or spot
+   that is missing is inserted, and existing hubs and spots (including in-game edits) are never
+   changed or deleted. To reset the bundled hubs and spots to the shipped values, apply
+   `data/sql/manual/world_city_life_refresh_bundled.sql` and then `world_city_life.sql` by hand; this
+   discards edits to the bundled hubs and spots. A bundled spot deleted in game is inserted again the
+   next time the module's world SQL changes (a module update), so disable it with `enabled = 0` in
+   the database instead of deleting it.
+   Every other file stays in `data/sql/manual/` and is applied by hand, as below.
    Apply `data/sql/manual/world_pvp_life.sql` for PvP, which is enabled by default. To run without
    PvP, set `PvPLife.Enable = 0`; its tables are not required while that component is disabled.
 3. Apply `data/sql/manual/world_city_life_locations.sql` to add the optional city/quest locations.
@@ -190,8 +241,8 @@ The bundled faction-specific Wintergrasp hubs maintain their own reserved popula
    Skip the latter on installations without PvP tables. These additive files preserve existing
    named records and customizations and can be rerun safely.
 4. For the default-on Custom features, apply `data/sql/manual/world_city_life_custom.sql` to WORLD
-   and both `data/sql/manual/characters_city_life_custom.sql` and
-   `data/sql/manual/characters_city_life_custom_bots.sql` to CHARACTERS. These add Custom data,
+   and `data/sql/manual/characters_city_life_custom_bots.sql` to CHARACTERS
+   (`characters_city_life_custom.sql` is applied automatically, see step 2). These add Custom data,
    equipment recovery and a managed-character registry; installation does not modify inventories.
    `world_city_life_legendary_stormwind.sql` updates the older default Stormwind Legendary plaza position/facing.
 5. Apply `data/sql/manual/world_city_life_fishing.sql` to WORLD for the expanded Fishing Life
@@ -238,10 +289,10 @@ the former PvP file takes precedence over the former City file. Values are not p
 Existing `pvp_life_zone`, `pvp_life_chat`, `city_life_hub` and `city_life_spot` data remain compatible.
 If you previously used only City Life, apply `world_pvp_life.sql` once before the PvP location update,
 or set `PvPLife.Enable = 0` and skip both PvP SQL files. If you previously used only PvP Life,
-apply `world_city_life.sql` once to create the missing City tables before the City updates.
+the DB updater creates the missing City tables from `data/sql/db-world/world_city_life.sql`.
 Apply a component's base seed only when its tables do not exist; preserve the installed component's data.
 Apply the two `*_locations.sql` files for optional geographic additions,
-`world_city_life_custom.sql` and `characters_city_life_custom*.sql` for Custom features, and
+`world_city_life_custom.sql` and `characters_city_life_custom_bots.sql` for Custom features, and
 `world_city_life_fishing.sql` for Fishing Life. Do not reapply full base seed scripts over
 customized data. Installations predating the three original quest hubs can also
 apply `world_city_life_quest_zones.sql` once before the new locations file.
