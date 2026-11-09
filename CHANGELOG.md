@@ -12,7 +12,7 @@
 - Never teleport a bot, to a hub or back on release, while a real player is within 150 yards of its
   current position or destination; fetches pick another bot, optional releases retry on a later pass.
   A bot that must leave at once (grouped, player-controlled, on another map, flying, on a transport,
-  hub gone) is released in place without a teleport, and its next playerbots random teleport waits a
+  hub gone) is released in place without a teleport. A bot that is not sent home is scheduled for a
   normal random-teleport interval instead of playerbots' short post-release delay. A self-bot
   counts as a real player for the 150-yard check.
 - A bundled spot deleted in game returns the next time the module's world SQL changes; set

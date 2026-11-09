@@ -202,7 +202,8 @@ keeps its own selection.
   is a constant in `CityLifeMgr.cpp`, not a setting.
 - The guard covers City Life's own teleports only. A random bot sent home is scheduled for
   mod-playerbots' default teleport delay (60 seconds plus one to three times
-  `Playerbots.RandomBotUpdateInterval`). A random bot released in place is scheduled for a normal
+  `Playerbots.RandomBotUpdateInterval`). A random bot that is not sent home (released in place, or in
+  combat, mid-teleport or without a safe return spot) is scheduled for a normal
   random-teleport interval instead (between `Playerbots.MinRandomBotTeleportInterval` and
   `Playerbots.MaxRandomBotTeleportInterval`). Either way mod-playerbots' random teleport
   (`RandomTeleportForLevel`) later moves the bot and does not check for nearby real players.

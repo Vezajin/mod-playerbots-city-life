@@ -1172,20 +1172,23 @@ namespace CityLife
             !player->IsInCombat())
             player->StopMoving();
         ClearCityStrategies(player);
-        if (sRandomPlayerbotMgr.IsRandomBot(player))
-        {
-            // After a return home playerbots moves the bot on soon (its default delay). A bot released in place
-            // may stand next to a real player, so it waits the normal random-teleport interval instead.
-            sRandomPlayerbotMgr.ScheduleTeleport(resident.Bot.GuidLow, returnHome ? 0 :
-                urand(sPlayerbotAIConfig.MinRandomBotTeleportInterval,
-                    sPlayerbotAIConfig.MaxRandomBotTeleportInterval));
-        }
+        bool returned = false;
         if (returnHome && !player->IsBeingTeleported() && !player->IsInCombat())
         {
-            if (!TeleportBot(player, resident.OriginalMap, resident.OriginalX, resident.OriginalY,
-                resident.OriginalZ, resident.OriginalO) && _debug)
+            returned = TeleportBot(player, resident.OriginalMap, resident.OriginalX, resident.OriginalY,
+                resident.OriginalZ, resident.OriginalO);
+            if (!returned && _debug)
                 LOG_WARN("module", "[CityLife] {} could not return safely; released at current position.",
                     resident.Bot.Name);
+        }
+        if (sRandomPlayerbotMgr.IsRandomBot(player))
+        {
+            // After a return home playerbots moves the bot on soon (its default delay). A bot that is not sent
+            // home (blocked, in combat, mid-teleport or no safe spot) may stand next to a real player, so it
+            // waits the normal random-teleport interval instead.
+            sRandomPlayerbotMgr.ScheduleTeleport(resident.Bot.GuidLow, returned ? 0 :
+                urand(sPlayerbotAIConfig.MinRandomBotTeleportInterval,
+                    sPlayerbotAIConfig.MaxRandomBotTeleportInterval));
         }
         return true;
     }
