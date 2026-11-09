@@ -75,7 +75,7 @@ namespace
         {
             Player* other = pair.second;
             if (other && other->IsInWorld() && other->GetSession() && other->GetMapId() == mapId &&
-                ::IsRealPlayer(other) && other->GetExactDist(x, y, z) <= radius)
+                (::IsRealPlayer(other) || ::IsSelfBot(other)) && other->GetExactDist(x, y, z) <= radius)
                 return true;
         }
         return false;
@@ -278,7 +278,8 @@ namespace CityLife
         sCityLifeHumanBehavior.Reset();
         // Restore outfits with the old settings before reloading or disabling ambient roles.
         for (auto resident = _residents.begin(); resident != _residents.end();)
-            if (resident->Custom != CustomRole::None && ReleaseResident(*resident, true))
+            if (resident->Custom != CustomRole::None &&
+                ReleaseResident(*resident, CanReturnHome(*resident, FindPlayer(resident->Bot.GuidLow))))
                 resident = _residents.erase(resident);
             else
                 ++resident;
@@ -1172,7 +1173,13 @@ namespace CityLife
             player->StopMoving();
         ClearCityStrategies(player);
         if (sRandomPlayerbotMgr.IsRandomBot(player))
-            sRandomPlayerbotMgr.ScheduleTeleport(resident.Bot.GuidLow);
+        {
+            // After a return home playerbots moves the bot on soon (its default delay). A bot released in place
+            // may stand next to a real player, so it waits the normal random-teleport interval instead.
+            sRandomPlayerbotMgr.ScheduleTeleport(resident.Bot.GuidLow, returnHome ? 0 :
+                urand(sPlayerbotAIConfig.MinRandomBotTeleportInterval,
+                    sPlayerbotAIConfig.MaxRandomBotTeleportInterval));
+        }
         if (returnHome && !player->IsBeingTeleported() && !player->IsInCombat())
         {
             if (!TeleportBot(player, resident.OriginalMap, resident.OriginalX, resident.OriginalY,
@@ -1299,12 +1306,12 @@ namespace CityLife
                         return resident.HubId == hub.Id && player && !player->IsInCombat() &&
                             !player->IsBeingTeleported() &&
                             (!resident.Questing || !player->IsNonMeleeSpellCast(false)) &&
-                            !(_returnBots && ReturnBlocked(resident, player));
+                            !(CanReturnHome(resident, player) && ReturnBlocked(resident, player));
                     });
                 if (found == _residents.rend())
                     break;
                 auto eraseAt = std::next(found).base();
-                if (!ReleaseResident(*eraseAt, _returnBots))
+                if (!ReleaseResident(*eraseAt, CanReturnHome(*eraseAt, FindPlayer(eraseAt->Bot.GuidLow))))
                     break;
                 _residents.erase(eraseAt);
                 ++changes;
@@ -2152,7 +2159,8 @@ namespace CityLife
         if (command == "reload")
         {
             for (auto resident = _residents.begin(); resident != _residents.end();)
-                if (resident->Custom != CustomRole::None && ReleaseResident(*resident, true))
+                if (resident->Custom != CustomRole::None &&
+                    ReleaseResident(*resident, CanReturnHome(*resident, FindPlayer(resident->Bot.GuidLow))))
                     resident = _residents.erase(resident);
                 else
                     ++resident;

@@ -196,12 +196,16 @@ keeps its own selection.
   from on release (`CityLife.Bots.ReturnWhenReleased`). A fetch then tries another bot, or the hub
   retries on a later tick. A release that is optional (expired residence, population shrink, City
   Life disabled) leaves a usable bot in place and retries on a later pass. A bot that has to leave
-  at once (grouped, a real player's master, on another map, flying, on a transport, or its hub gone)
-  is released where it stands with no teleport. The 150-yard radius is a constant in
-  `CityLifeMgr.cpp`, not a setting.
-- The guard covers City Life's own teleports only. Once a bot is released, mod-playerbots' random
-  teleport (`ScheduleTeleport` leading to `RandomTeleportForLevel`) can still move it later, and it
-  does not check for nearby real players.
+  at once (grouped, controlled by a real player, on another map, flying, on a transport, or its hub
+  gone) is released where it stands with no teleport. A self-bot (a player's own character running
+  playerbot AI, so it is its own master) counts as a real player for the 150-yard check. The radius
+  is a constant in `CityLifeMgr.cpp`, not a setting.
+- The guard covers City Life's own teleports only. A random bot sent home is scheduled for
+  mod-playerbots' default teleport delay (60 seconds plus one to three times
+  `Playerbots.RandomBotUpdateInterval`). A random bot released in place is scheduled for a normal
+  random-teleport interval instead (between `Playerbots.MinRandomBotTeleportInterval` and
+  `Playerbots.MaxRandomBotTeleportInterval`). Either way mod-playerbots' random teleport
+  (`RandomTeleportForLevel`) later moves the bot and does not check for nearby real players.
 
 #### A member is a bot when...
 
@@ -225,7 +229,9 @@ every other account is a real player's:
    that is missing is inserted, and existing hubs and spots (including in-game edits) are never
    changed or deleted. To reset the bundled hubs and spots to the shipped values, apply
    `data/sql/manual/world_city_life_refresh_bundled.sql` and then `world_city_life.sql` by hand; this
-   discards edits to the bundled hubs and spots.
+   discards edits to the bundled hubs and spots. A bundled spot deleted in game is inserted again the
+   next time the module's world SQL changes (a module update), so disable it with `enabled = 0` in
+   the database instead of deleting it.
    Every other file stays in `data/sql/manual/` and is applied by hand, as below.
    Apply `data/sql/manual/world_pvp_life.sql` for PvP, which is enabled by default. To run without
    PvP, set `PvPLife.Enable = 0`; its tables are not required while that component is disabled.
